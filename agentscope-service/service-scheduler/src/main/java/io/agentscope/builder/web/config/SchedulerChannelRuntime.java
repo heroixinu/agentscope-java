@@ -24,6 +24,7 @@ import io.agentscope.extensions.channel.feishu.FeishuChannel;
 import io.agentscope.extensions.channel.github.GitHubChannel;
 import io.agentscope.extensions.channel.gitlab.GitLabChannel;
 import io.agentscope.extensions.channel.wecom.WeComChannel;
+import io.agentscope.extensions.channel.wecom.kf.WeComKfChannel;
 import io.agentscope.harness.agent.gateway.ChannelManager;
 import io.agentscope.harness.agent.gateway.Gateway;
 import io.agentscope.harness.agent.gateway.channel.Channel;
@@ -114,6 +115,7 @@ public class SchedulerChannelRuntime implements SmartLifecycle {
         ChannelTypeRegistry.register(DingTalkChannel.TYPE, DingTalkChannel::fromProperties);
         ChannelTypeRegistry.register(FeishuChannel.TYPE, FeishuChannel::fromProperties);
         ChannelTypeRegistry.register(WeComChannel.TYPE, WeComChannel::fromProperties);
+        ChannelTypeRegistry.register(WeComKfChannel.TYPE, WeComKfChannel::fromProperties);
         ChannelTypeRegistry.register(GitHubChannel.TYPE, GitHubChannel::fromProperties);
         ChannelTypeRegistry.register(GitLabChannel.TYPE, GitLabChannel::fromProperties);
         log.info("Registered channel factories: {}", ChannelTypeRegistry.registeredTypes());
