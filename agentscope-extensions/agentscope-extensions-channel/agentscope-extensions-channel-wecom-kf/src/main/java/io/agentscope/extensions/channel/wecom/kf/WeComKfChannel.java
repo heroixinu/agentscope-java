@@ -29,7 +29,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
 import me.chanjar.weixin.cp.bean.kf.WxCpKfMsgListResp.WxCpKfMsgItem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,7 +63,7 @@ public final class WeComKfChannel implements Channel {
     private final BotLoopGuard botLoopGuard;
     private final ChannelRouter router;
     private final WeComKfChannelRegistry registry;
-    private final AtomicReference<String> cursor = new AtomicReference<>();
+    private final WeComKfCursorStore cursorStore;
 
     private volatile Gateway gateway;
     private volatile Sinks.Many<WeComKfWxClient.CallbackSignal> callbackSink;
@@ -80,7 +79,8 @@ public final class WeComKfChannel implements Channel {
             IdempotencyStore idempotency,
             BotLoopGuard botLoopGuard,
             ChannelRouter router,
-            WeComKfChannelRegistry registry) {
+            WeComKfChannelRegistry registry,
+            WeComKfCursorStore cursorStore) {
         this.channelId = Objects.requireNonNull(channelId, "channelId");
         this.config = Objects.requireNonNull(config, "config");
         this.properties = Objects.requireNonNull(properties, "properties");
@@ -91,11 +91,27 @@ public final class WeComKfChannel implements Channel {
         this.botLoopGuard = Objects.requireNonNull(botLoopGuard, "botLoopGuard");
         this.router = Objects.requireNonNull(router, "router");
         this.registry = Objects.requireNonNull(registry, "registry");
+        this.cursorStore = Objects.requireNonNull(cursorStore, "cursorStore");
     }
 
     /** Factory matching the other AgentScope channel extensions. */
     public static WeComKfChannel fromProperties(
             String channelId, ChannelConfig routing, Map<String, Object> rawProperties) {
+        return fromProperties(
+                channelId, routing, rawProperties, new InMemoryWeComKfCursorStore());
+    }
+
+    /**
+     * Factory with an application-provided cursor store.
+     *
+     * <p>Use {@link RedissonWeComKfCursorStore} for multi-Pod deployments so callbacks handled by
+     * different Pods share the same {@code sync_msg} cursor and synchronization lease.
+     */
+    public static WeComKfChannel fromProperties(
+            String channelId,
+            ChannelConfig routing,
+            Map<String, Object> rawProperties,
+            WeComKfCursorStore cursorStore) {
         WeComKfChannelProperties props =
                 WeComKfChannelProperties.from(channelId, rawProperties);
         WeComKfWxClient wxClient = new WeComKfWxClient(props);
@@ -109,7 +125,8 @@ public final class WeComKfChannel implements Channel {
                 new IdempotencyStore(),
                 new BotLoopGuard(),
                 new ChannelRouter(routing.defaultAgentId()),
-                WeComKfChannelRegistry.instance());
+                WeComKfChannelRegistry.instance(),
+                cursorStore);
     }
 
     @Override
@@ -230,22 +247,26 @@ public final class WeComKfChannel implements Channel {
     }
 
     private Mono<Void> synchronize(WeComKfWxClient.CallbackSignal signal) {
-        return Mono.fromCallable(
-                        () ->
-                                wxClient.syncAll(
-                                        cursor.get(),
-                                        signal.token(),
-                                        properties.openKfid(),
-                                        properties.syncLimit(),
-                                        properties.voiceFormat()))
-                .subscribeOn(Schedulers.boundedElastic())
-                .flatMap(
-                        batch ->
-                                Flux.fromIterable(batch.messages())
-                                        .concatMap(this::handleItem)
-                                        .then(
-                                                Mono.fromRunnable(
-                                                        () -> cursor.set(batch.nextCursor()))));
+        return Mono.usingWhen(
+                cursorStore.acquire(channelId, properties.openKfid()),
+                lease ->
+                        Mono.fromCallable(
+                                        () ->
+                                                wxClient.syncAll(
+                                                        lease.cursor(),
+                                                        signal.token(),
+                                                        properties.openKfid(),
+                                                        properties.syncLimit(),
+                                                        properties.voiceFormat()))
+                                .subscribeOn(Schedulers.boundedElastic())
+                                .flatMap(
+                                        batch ->
+                                                Flux.fromIterable(batch.messages())
+                                                        .concatMap(this::handleItem)
+                                                        .then(lease.commit(batch.nextCursor()))),
+                WeComKfCursorStore.CursorLease::release,
+                (lease, error) -> lease.release(),
+                WeComKfCursorStore.CursorLease::release);
     }
 
     private Mono<Void> handleItem(WxCpKfMsgItem item) {
