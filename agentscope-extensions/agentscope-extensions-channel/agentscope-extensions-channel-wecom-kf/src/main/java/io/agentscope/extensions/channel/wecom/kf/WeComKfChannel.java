@@ -213,7 +213,7 @@ public final class WeComKfChannel implements Channel {
                 .subscribe();
     }
 
-    boolean enqueueCallback(WeComKfWxClient.CallbackSignal signal) {
+    synchronized boolean enqueueCallback(WeComKfWxClient.CallbackSignal signal) {
         Sinks.Many<WeComKfWxClient.CallbackSignal> sink = callbackSink;
         if (sink == null) {
             return false;
