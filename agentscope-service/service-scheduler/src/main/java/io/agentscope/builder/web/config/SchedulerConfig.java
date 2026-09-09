@@ -32,6 +32,8 @@ import io.agentscope.builder.web.persistence.jpa.CoordWorkerHeartbeatEntityRepos
 import io.agentscope.builder.web.share.AgentAclService;
 import io.agentscope.builder.web.share.AgentVisibilityResolver;
 import io.agentscope.builder.web.share.JpaAgentVisibilityResolver;
+import io.agentscope.extensions.channel.wecom.kf.InMemoryWeComKfCursorStore;
+import io.agentscope.extensions.channel.wecom.kf.WeComKfCursorStore;
 import io.agentscope.extensions.mysql.store.JdbcStore;
 import io.agentscope.harness.agent.filesystem.remote.store.BaseStore;
 import io.agentscope.harness.agent.gateway.ChannelManager;
@@ -53,6 +55,7 @@ import org.springframework.web.reactive.function.client.WebClient;
  *   <li>{@link ObjectMapper} — lenient mapper (unknown properties ignored) shared by the channel
  *       runtime and the session bridge when talking to the other planes;
  *   <li>{@link ChannelManager} — harness channel registry owning every live IM channel adapter;
+ *   <li>{@link WeComKfCursorStore} — synchronization state provider for WeCom Customer Service;
  *   <li>{@link OutboundService} — outbound delivery into registered channels;
  *   <li>{@link AgentVisibilityResolver} — JPA-only read view over the shared database, backing
  *       {@code AgentAccessGuard} on the outbound endpoint;
@@ -78,6 +81,19 @@ public class SchedulerConfig {
     @Bean
     public ChannelManager channelManager() {
         return new ChannelManager();
+    }
+
+    /**
+     * Default WeCom KF sync state for single-instance Scheduler deployments.
+     *
+     * <p>Multi-Pod deployments can replace this bean with {@code RedissonWeComKfCursorStore}; the
+     * scheduler channel factory consumes the SPI and does not need to know which implementation is
+     * active.
+     */
+    @Bean
+    @ConditionalOnMissingBean(WeComKfCursorStore.class)
+    public WeComKfCursorStore weComKfCursorStore() {
+        return new InMemoryWeComKfCursorStore();
     }
 
     /** Outbound delivery service shared by the HTTP controller. */
