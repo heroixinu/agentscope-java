@@ -334,6 +334,13 @@
 
         <dependency>
             <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-channel-wecom-kf</artifactId>
+            <scope>compile</scope>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>io.agentscope</groupId>
             <artifactId>agentscope-extensions-oss</artifactId>
             <scope>compile</scope>
             <optional>true</optional>
@@ -493,9 +500,6 @@
                         <id>attach-javadoc</id>
                         <goals>
                             <goal>jar</goal>
-                        </goals>
-                        <configuration>
-                            <doclint>none</doclint>
                         </configuration>
                     </execution>
                 </executions>
