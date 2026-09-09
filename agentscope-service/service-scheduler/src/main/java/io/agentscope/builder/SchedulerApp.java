@@ -15,8 +15,11 @@
  */
 package io.agentscope.builder;
 
+import io.agentscope.extensions.channel.wecom.WeComCallbackController;
+import io.agentscope.extensions.channel.wecom.kf.WeComKfCallbackController;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Import;
 
 /**
  * Entry point for the builder <b>scheduler plane</b>.
@@ -24,7 +27,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * <p>Hosts everything that executes work outside the request path of the other planes:
  *
  * <ul>
- *   <li><b>IM channel runtimes</b> (DingTalk, Feishu, WeCom, GitHub, GitLab) — channel
+ *   <li><b>IM channel runtimes</b> (DingTalk, Feishu, WeCom, WeCom KF, GitHub, GitLab) — channel
  *       configuration is pulled from the control plane's internal API; inbound messages are
  *       bridged into managed sessions (control plane find-or-create, data plane turn events)
  *   <li><b>Outbound delivery</b> — {@code /api/outbound/send} pushes agent-initiated messages
@@ -49,6 +52,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
             "io.agentscope.builder.web.share",
             "io.agentscope.builder.worker"
         })
+@Import({WeComCallbackController.class, WeComKfCallbackController.class})
 public class SchedulerApp {
     public static void main(String[] args) {
         SpringApplication.run(SchedulerApp.class, args);

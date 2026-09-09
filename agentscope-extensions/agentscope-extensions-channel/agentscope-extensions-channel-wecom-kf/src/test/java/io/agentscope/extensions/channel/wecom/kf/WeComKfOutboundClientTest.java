@@ -1,0 +1,58 @@
+/*
+ * Copyright 2024-2026 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package io.agentscope.extensions.channel.wecom.kf;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+
+class WeComKfOutboundClientTest {
+
+    @Test
+    void shouldKeepShortTextAsSingleMessage() {
+        assertEquals(List.of("hello"), WeComKfOutboundClient.splitText("hello", 2048));
+    }
+
+    @Test
+    void shouldSplitChineseTextByUtf8Bytes() {
+        String input = "客服".repeat(500);
+        List<String> chunks = WeComKfOutboundClient.splitText(input, 2048);
+
+        assertTrue(chunks.size() > 1);
+        assertEquals(input, String.join("", chunks));
+        assertTrue(
+                chunks.stream()
+                        .allMatch(
+                                chunk ->
+                                        chunk.getBytes(StandardCharsets.UTF_8).length <= 2048));
+    }
+
+    @Test
+    void shouldNotBreakEmojiSurrogatePairs() {
+        String input = "🙂".repeat(700);
+        List<String> chunks = WeComKfOutboundClient.splitText(input, 2048);
+
+        assertEquals(input, String.join("", chunks));
+        assertTrue(
+                chunks.stream()
+                        .allMatch(
+                                chunk ->
+                                        chunk.getBytes(StandardCharsets.UTF_8).length <= 2048));
+    }
+}

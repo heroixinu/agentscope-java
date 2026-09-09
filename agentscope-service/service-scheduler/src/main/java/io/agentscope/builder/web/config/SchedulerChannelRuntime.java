@@ -24,6 +24,8 @@ import io.agentscope.extensions.channel.feishu.FeishuChannel;
 import io.agentscope.extensions.channel.github.GitHubChannel;
 import io.agentscope.extensions.channel.gitlab.GitLabChannel;
 import io.agentscope.extensions.channel.wecom.WeComChannel;
+import io.agentscope.extensions.channel.wecom.kf.WeComKfChannel;
+import io.agentscope.extensions.channel.wecom.kf.WeComKfCursorStore;
 import io.agentscope.harness.agent.gateway.ChannelManager;
 import io.agentscope.harness.agent.gateway.Gateway;
 import io.agentscope.harness.agent.gateway.channel.Channel;
@@ -69,6 +71,7 @@ public class SchedulerChannelRuntime implements SmartLifecycle {
     private final WebClient controlPlane;
     private final ObjectMapper objectMapper;
     private final ChannelRuntimeCatalog catalog;
+    private final WeComKfCursorStore weComKfCursorStore;
     private final int configFetchRetries;
     private final long configFetchBackoffMs;
     private final long refreshIntervalMs;
@@ -93,6 +96,7 @@ public class SchedulerChannelRuntime implements SmartLifecycle {
             @Qualifier("controlPlaneWebClient") WebClient controlPlane,
             ObjectMapper objectMapper,
             ChannelRuntimeCatalog catalog,
+            WeComKfCursorStore weComKfCursorStore,
             @Value("${builder.scheduler.channel-config-retries:12}") int configFetchRetries,
             @Value("${builder.scheduler.channel-config-backoff-ms:5000}") long backoffMs,
             @Value("${builder.scheduler.channel-refresh-ms:15000}") long refreshIntervalMs) {
@@ -101,19 +105,26 @@ public class SchedulerChannelRuntime implements SmartLifecycle {
         this.controlPlane = controlPlane;
         this.objectMapper = objectMapper;
         this.catalog = catalog;
+        this.weComKfCursorStore = Objects.requireNonNull(weComKfCursorStore, "weComKfCursorStore");
         this.configFetchRetries = configFetchRetries;
         this.configFetchBackoffMs = backoffMs;
         this.refreshIntervalMs = refreshIntervalMs;
     }
 
     /** Registers the bundled channel factories exactly once per JVM. */
-    static void registerChannelFactories() {
+    static void registerChannelFactories(WeComKfCursorStore weComKfCursorStore) {
+        Objects.requireNonNull(weComKfCursorStore, "weComKfCursorStore");
         if (!FACTORIES_REGISTERED.compareAndSet(false, true)) {
             return;
         }
         ChannelTypeRegistry.register(DingTalkChannel.TYPE, DingTalkChannel::fromProperties);
         ChannelTypeRegistry.register(FeishuChannel.TYPE, FeishuChannel::fromProperties);
         ChannelTypeRegistry.register(WeComChannel.TYPE, WeComChannel::fromProperties);
+        ChannelTypeRegistry.register(
+                WeComKfChannel.TYPE,
+                (channelId, routing, properties) ->
+                        WeComKfChannel.fromProperties(
+                                channelId, routing, properties, weComKfCursorStore));
         ChannelTypeRegistry.register(GitHubChannel.TYPE, GitHubChannel::fromProperties);
         ChannelTypeRegistry.register(GitLabChannel.TYPE, GitLabChannel::fromProperties);
         log.info("Registered channel factories: {}", ChannelTypeRegistry.registeredTypes());
@@ -124,7 +135,7 @@ public class SchedulerChannelRuntime implements SmartLifecycle {
         if (running) {
             return;
         }
-        registerChannelFactories();
+        registerChannelFactories(weComKfCursorStore);
         reconcile(fetchChannelConfigWithRetry());
         running = true;
         if (refreshIntervalMs > 0) {
