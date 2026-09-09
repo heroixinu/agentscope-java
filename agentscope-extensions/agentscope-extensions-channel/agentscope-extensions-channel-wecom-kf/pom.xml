@@ -46,7 +46,7 @@
         <dependency>
             <groupId>com.github.binarywang</groupId>
             <artifactId>weixin-java-cp</artifactId>
-            <version>4.8.5</version>
+            <version>4.8.6.B</version>
         </dependency>
 
         <dependency>
