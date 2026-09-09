@@ -60,19 +60,29 @@ public record WeComKfChannelProperties(
             String channelId, Map<String, Object> rawProperties) {
         Objects.requireNonNull(channelId, "channelId");
         Map<String, Object> p = rawProperties != null ? rawProperties : Map.of();
+        String expectedCallbackPath = defaultCallbackPath(channelId);
+        String callbackPath = asStringOr(p, "callbackPath", expectedCallbackPath);
+        if (!expectedCallbackPath.equals(callbackPath)) {
+            throw new IllegalArgumentException(
+                    "wecom-kf.callbackPath is fixed by the Spring controller and must be '"
+                            + expectedCallbackPath
+                            + "'");
+        }
         return new WeComKfChannelProperties(
                 asString(p, "corpId"),
                 asString(p, "secret"),
                 asString(p, "token"),
                 asString(p, "encodingAesKey"),
                 asString(p, "openKfid"),
-                asStringOr(
-                        p,
-                        "callbackPath",
-                        "/api/channels/wecom-kf/" + channelId + "/callback"),
+                callbackPath,
                 asStringOr(p, "apiBase", DEFAULT_API_BASE),
                 asIntOr(p, "syncLimit", 1000),
                 asIntOr(p, "voiceFormat", 0));
+    }
+
+    public static String defaultCallbackPath(String channelId) {
+        Objects.requireNonNull(channelId, "channelId");
+        return "/api/channels/wecom-kf/" + channelId + "/callback";
     }
 
     private static void requireText(String value, String message) {
