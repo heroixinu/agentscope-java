@@ -1,8 +1,10 @@
 # AgentScope WeCom Customer Service Channel
 
-`agentscope-extensions-channel-wecom-kf` connects AgentScope Harness Gateway to **WeCom Customer Service (企业微信 / 微信客服)** using [WxJava](https://github.com/binarywang/WxJava).
+`agentscope-extensions-channel-wecom-kf` connects AgentScope Harness Gateway to **WeCom Customer Service (企业微信 / 微信客服)** using [WxJava](https://github.com/Wechat-Group/WxJava).
 
 This is intentionally separate from `agentscope-extensions-channel-wecom`. A normal WeCom self-built application receives the actual message in its callback. WeCom Customer Service callbacks only notify the server that new data exists; the server must call `kf/sync_msg` with the callback token and cursor to read the customer messages.
+
+The integration goal is **AgentScope feature parity with the existing `wecom` channel**. Differences should come from the WeCom Customer Service protocol itself, not from missing AgentScope integration.
 
 ## Data flow
 
@@ -66,6 +68,39 @@ That means the standard AgentScope `ChannelRouter` continues to provide bindings
 
 Only `origin=3` records are dispatched. `origin=4` system/events and `origin=5` servicer messages are ignored so an agent reply cannot be re-consumed as user input.
 
+### Feature parity with `agentscope-extensions-channel-wecom`
+
+| AgentScope capability | `wecom` | `wecom-kf` |
+| --- | --- | --- |
+| `Channel.TYPE` / `ChannelFactory` creation | yes | yes |
+| `init/start/stop` lifecycle | yes | yes |
+| callback GET verification | yes | yes, via WxJava |
+| callback POST ingestion | yes | yes, callback triggers `sync_msg` |
+| process registry by `channelId` | yes | yes |
+| `ChannelRouter` / bindings / default agent | yes | yes |
+| DM session scope / runtime context | yes | yes |
+| `Gateway.run(...)` dispatch | yes | yes |
+| `IdempotencyStore` safeguard | yes | yes |
+| `BotLoopGuard` | yes | yes |
+| agent reply delivery | yes | yes |
+| proactive `deliver()` | yes | yes, subject to KF API send window/state rules |
+| Scheduler runtime registration | yes | yes |
+| Scheduler callback hosting | yes | yes |
+| distribution / `agentscope-all` / BOM | yes | yes |
+| direct peer | yes | yes |
+| group/appchat peer | yes | not applicable: WeCom Customer Service is a 1:1 customer-service protocol |
+
+The KF-specific cursor/lease layer is an additional transport requirement; normal WeCom callbacks contain the message itself and therefore do not need it.
+
+## Scheduler integration
+
+The Builder `service-scheduler` treats `wecom-kf` as a first-class bundled channel alongside `wecom`:
+
+- `SchedulerChannelRuntime` registers both channel factories;
+- `SchedulerApp` explicitly hosts both callback controllers because its component-scan scope is limited to Builder packages;
+- `/api/channels/wecom/**` and `/api/channels/wecom-kf/**` are public transport endpoints in Scheduler security, while each controller still verifies the WeCom cryptographic signature;
+- Scheduler injects a `WeComKfCursorStore` into the KF factory. The default bean is `InMemoryWeComKfCursorStore`, and operators can replace it with `RedissonWeComKfCursorStore` without changing the channel runtime.
+
 ## Current message support
 
 The initial adapter maps inbound and outbound **text** messages. WxJava already exposes the image, voice, video, file, location, link, mini-program and menu beans from `sync_msg`; those can be added to the mapper without changing the channel/routing architecture.
@@ -87,7 +122,16 @@ This creates `InMemoryWeComKfCursorStore` and is appropriate for a single Pod.
 
 ### Redis / multi-Pod
 
-For multiple Pods, create one shared `RedissonClient` in the application and inject `RedissonWeComKfCursorStore` into the channel factory:
+For multiple Pods, create one shared `RedissonClient` in the application and inject `RedissonWeComKfCursorStore` into the channel factory or expose it as the Scheduler's `WeComKfCursorStore` bean:
+
+```java
+@Bean
+WeComKfCursorStore weComKfCursorStore(RedissonClient redissonClient) {
+    return new RedissonWeComKfCursorStore(redissonClient);
+}
+```
+
+For direct construction:
 
 ```java
 WeComKfCursorStore cursorStore = new RedissonWeComKfCursorStore(redissonClient);
@@ -121,7 +165,7 @@ new RedissonWeComKfCursorStore(redissonClient, "myapp:wecom-kf");
 
 ## WxJava
 
-This module pins `com.github.binarywang:weixin-java-cp:4.8.5` and uses:
+This module uses `com.github.binarywang:weixin-java-cp:4.8.6.B` and:
 
 - `WxCpDefaultConfigImpl` for corp/secret/token/AES/API base configuration
 - `WxCpServiceImpl` for access-token lifecycle and HTTP transport
