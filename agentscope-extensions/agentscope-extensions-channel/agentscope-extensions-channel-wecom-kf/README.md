@@ -10,7 +10,8 @@ This is intentionally separate from `agentscope-extensions-channel-wecom`. A nor
 WeChat customer
   -> WeCom KF callback (Token + OpenKfId)
   -> WeComKfCallbackController
-  -> per-channel serialized callback queue
+  -> per-channel callback queue
+  -> WeComKfCursorStore lease + cursor
   -> WxJava WxCpKfService.syncMsg(cursor, token, ..., open_kfid)
   -> filter origin=3 customer messages
   -> WeComKfInboundMapper
@@ -18,10 +19,13 @@ WeChat customer
   -> Gateway.run(...)
   -> Agent reply
   -> WxJava WxCpKfService.sendMsg(...)
-  -> WeChat customer
+  -> commit next_cursor
+  -> release cursor lease
 ```
 
-The callback is acknowledged immediately. Sync/API calls and outbound sends are blocking WxJava operations and are moved to Reactor `boundedElastic`, so the Spring WebFlux request thread is not blocked.
+The callback is acknowledged immediately. Sync/API calls and outbound sends are executed outside the Spring WebFlux request thread.
+
+**No business message database is required by this adapter.** Messages fetched from `sync_msg` are passed directly into the AgentScope Gateway. Persistent runtime state is limited to the `sync_msg` cursor and, for multi-Pod deployments, the distributed synchronization lease.
 
 ## Configuration
 
@@ -66,11 +70,54 @@ Only `origin=3` records are dispatched. `origin=4` system/events and `origin=5` 
 
 The initial adapter maps inbound and outbound **text** messages. WxJava already exposes the image, voice, video, file, location, link, mini-program and menu beans from `sync_msg`; those can be added to the mapper without changing the channel/routing architecture.
 
-## Runtime state
+## CursorStore SPI
 
-The `sync_msg` cursor is kept per channel instance in memory and callback processing is serialized per channel. `MsgId` is additionally deduplicated with the common AgentScope `IdempotencyStore`.
+`WeComKfCursorStore` owns the only transport state that must survive between callbacks. Its lease deliberately combines two responsibilities that must be atomic from the channel's point of view:
 
-For multi-Pod deployments, provide external callback affinity or evolve the cursor/idempotency layer to a shared store before allowing multiple Pods to consume callbacks for the same `open_kfid`.
+1. serialize one synchronization cycle for the same `channelId + open_kfid`;
+2. expose the current cursor and commit the next cursor before releasing ownership.
+
+The normal factory remains backwards compatible and uses a process-local implementation:
+
+```java
+WeComKfChannel channel = WeComKfChannel.fromProperties(channelId, routing, properties);
+```
+
+This creates `InMemoryWeComKfCursorStore` and is appropriate for a single Pod.
+
+### Redis / multi-Pod
+
+For multiple Pods, create one shared `RedissonClient` in the application and inject `RedissonWeComKfCursorStore` into the channel factory:
+
+```java
+WeComKfCursorStore cursorStore = new RedissonWeComKfCursorStore(redissonClient);
+
+WeComKfChannel channel =
+        WeComKfChannel.fromProperties(channelId, routing, properties, cursorStore);
+```
+
+The default Redis key prefix is:
+
+```text
+agentscope:channel:wecom-kf
+```
+
+For each channel/account pair the implementation uses Redis Cluster hash-tagged keys equivalent to:
+
+```text
+agentscope:channel:wecom-kf:{channelId|openKfid}:cursor
+agentscope:channel:wecom-kf:{channelId|openKfid}:lock
+```
+
+The Redisson lock uses an explicit owner id, so Reactor thread switches do not affect unlock ownership. Redisson's lock watchdog keeps the distributed lease alive while `sync_msg` and AgentScope processing are in progress. A callback handled by another Pod therefore waits, acquires the lease, reads the cursor committed by the previous Pod, and continues from that position.
+
+A custom prefix can be supplied with:
+
+```java
+new RedissonWeComKfCursorStore(redissonClient, "myapp:wecom-kf");
+```
+
+`IdempotencyStore` remains as a lightweight process-local duplicate guard, but it is not used as durable message storage and is not the source of truth for synchronization progress. The Redis cursor + lease is what coordinates multi-Pod message fetching.
 
 ## WxJava
 
@@ -81,3 +128,5 @@ This module pins `com.github.binarywang:weixin-java-cp:4.8.5` and uses:
 - `WxCpCryptUtil` / `WxCpXmlMessage` for callback verification and decryption
 - `WxCpKfService.syncMsg` for message synchronization
 - `WxCpKfService.sendMsg` for replies
+
+The Redis cursor implementation reuses the repository-managed Redisson dependency; it does not introduce Spring Data Redis or a second Redis client stack.
