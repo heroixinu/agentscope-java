@@ -15,6 +15,7 @@
  */
 package io.agentscope.builder;
 
+import io.agentscope.extensions.channel.wecom.WeComCallbackController;
 import io.agentscope.extensions.channel.wecom.kf.WeComKfCallbackController;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -51,7 +52,7 @@ import org.springframework.context.annotation.Import;
             "io.agentscope.builder.web.share",
             "io.agentscope.builder.worker"
         })
-@Import(WeComKfCallbackController.class)
+@Import({WeComCallbackController.class, WeComKfCallbackController.class})
 public class SchedulerApp {
     public static void main(String[] args) {
         SpringApplication.run(SchedulerApp.class, args);
