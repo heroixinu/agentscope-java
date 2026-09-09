@@ -18,6 +18,8 @@ package io.agentscope.extensions.channel.wecom.kf;
 import io.agentscope.core.message.Msg;
 import io.agentscope.harness.agent.gateway.channel.OutboundAddress;
 import io.agentscope.harness.agent.gateway.channel.PeerKind;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -25,6 +27,8 @@ import reactor.core.scheduler.Schedulers;
 
 /** Sends AgentScope replies through WxJava's WeCom Customer Service send_msg API. */
 final class WeComKfOutboundClient {
+
+    static final int MAX_TEXT_BYTES = 2048;
 
     private final WeComKfWxClient wxClient;
     private final String openKfid;
@@ -55,13 +59,56 @@ final class WeComKfOutboundClient {
         if (text == null || text.isBlank()) {
             return Mono.empty();
         }
-        return Mono.fromCallable(
-                        () -> {
-                            wxClient.sendText(externalUserId, openKfid, text);
-                            return Boolean.TRUE;
-                        })
-                .subscribeOn(Schedulers.boundedElastic())
+        return Flux.fromIterable(splitText(text, MAX_TEXT_BYTES))
+                .concatMap(
+                        chunk ->
+                                Mono.fromCallable(
+                                                () -> {
+                                                    wxClient.sendText(
+                                                            externalUserId, openKfid, chunk);
+                                                    return Boolean.TRUE;
+                                                })
+                                        .subscribeOn(Schedulers.boundedElastic())
+                                        .then())
                 .then();
+    }
+
+    /** Splits by UTF-8 byte size without breaking surrogate pairs / Unicode code points. */
+    static List<String> splitText(String text, int maxBytes) {
+        if (text == null || text.isEmpty()) {
+            return List.of();
+        }
+        if (maxBytes <= 0) {
+            throw new IllegalArgumentException("maxBytes must be positive");
+        }
+        if (text.getBytes(StandardCharsets.UTF_8).length <= maxBytes) {
+            return List.of(text);
+        }
+
+        List<String> chunks = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        int currentBytes = 0;
+        for (int offset = 0; offset < text.length(); ) {
+            int codePoint = text.codePointAt(offset);
+            String value = new String(Character.toChars(codePoint));
+            int bytes = value.getBytes(StandardCharsets.UTF_8).length;
+            if (bytes > maxBytes) {
+                throw new IllegalArgumentException(
+                        "maxBytes is too small for a single UTF-8 code point");
+            }
+            if (currentBytes + bytes > maxBytes && current.length() > 0) {
+                chunks.add(current.toString());
+                current.setLength(0);
+                currentBytes = 0;
+            }
+            current.append(value);
+            currentBytes += bytes;
+            offset += Character.charCount(codePoint);
+        }
+        if (current.length() > 0) {
+            chunks.add(current.toString());
+        }
+        return List.copyOf(chunks);
     }
 
     private static PeerTarget parseAddress(OutboundAddress address) {
