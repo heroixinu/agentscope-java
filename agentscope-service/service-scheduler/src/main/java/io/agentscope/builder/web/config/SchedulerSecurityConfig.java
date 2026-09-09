@@ -47,11 +47,13 @@ import reactor.core.publisher.Mono;
  *
  * <ul>
  *   <li>{@code /actuator/health|info} — public
+ *   <li>{@code /api/channels/wecom/**} and {@code /api/channels/wecom-kf/**} — public transport
+ *       endpoints; authenticity is verified by the corresponding WeCom callback crypto/signature
  *   <li>{@code /api/**} — requires an authenticated principal: a user JWT (same signing secret as
  *       the control plane) or the internal token ({@code X-Builder-Internal-Token}) for
  *       plane-to-plane calls from the data / control planes
  *   <li>{@code /**} — public (the scheduler serves no browser assets; only {@code /api/**} is
- *       protected)
+ *       protected apart from the verified callback exceptions above)
  * </ul>
  */
 @Configuration
@@ -68,6 +70,10 @@ public class SchedulerSecurityConfig {
                 .authorizeExchange(
                         auth ->
                                 auth.pathMatchers("/actuator/health", "/actuator/info")
+                                        .permitAll()
+                                        .pathMatchers(
+                                                "/api/channels/wecom/**",
+                                                "/api/channels/wecom-kf/**")
                                         .permitAll()
                                         .pathMatchers("/api/**")
                                         .authenticated()
