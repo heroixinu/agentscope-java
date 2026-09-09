@@ -239,13 +239,13 @@ public final class WeComKfChannel implements Channel {
                                         properties.syncLimit(),
                                         properties.voiceFormat()))
                 .subscribeOn(Schedulers.boundedElastic())
-                .flatMapMany(
-                        batch -> {
-                            cursor.set(batch.nextCursor());
-                            return Flux.fromIterable(batch.messages());
-                        })
-                .concatMap(this::handleItem)
-                .then();
+                .flatMap(
+                        batch ->
+                                Flux.fromIterable(batch.messages())
+                                        .concatMap(this::handleItem)
+                                        .then(
+                                                Mono.fromRunnable(
+                                                        () -> cursor.set(batch.nextCursor()))));
     }
 
     private Mono<Void> handleItem(WxCpKfMsgItem item) {
